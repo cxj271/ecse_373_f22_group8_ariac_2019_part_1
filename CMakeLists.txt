@@ -8,9 +8,20 @@ project(cwru_ecse_373_submission)
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
 ## is used, also find other catkin packages
 find_package(catkin REQUIRED COMPONENTS
+  actionlib
+  control_msgs
   ecse_373_ariac
+  geometry_msgs
+  osrf_gear
   roscpp
   rviz
+  sensor_msgs
+  std_msgs
+  std_srvs
+  tf
+  tf2
+  tf2_ros
+  trajectory_msgs
 )
 
 ## System dependencies are found with CMake's conventions
@@ -153,6 +164,7 @@ add_executable(subscriber_node src/starter.cpp)
 
 target_link_libraries(subscriber_node
    ${catkin_LIBRARIES}
+   ur10_kin
  )
 
 #############

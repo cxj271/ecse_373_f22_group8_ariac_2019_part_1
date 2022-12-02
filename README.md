@@ -5,7 +5,7 @@
 1. Run the launch file for the simulation environment
 
 ```
-roslaunch ecse_373_ariac ecse_373_ariac.launch &
+roslaunch ecse_373_ariac ecse_373_ariac.launch  python:=false&
 ```
 Note: Either use the patch or add the arguement python:=false when launching
 
@@ -20,5 +20,5 @@ rosservice info /ariac/start_competition
 3. Run the node created in starter.cpp
 
 ```
-rosrun ariac_2019_part_1 subscriber_node
+rosrun cwru_ecse_373_submission subscriber_node
 ```

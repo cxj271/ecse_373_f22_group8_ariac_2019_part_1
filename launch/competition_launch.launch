@@ -1,0 +1,9 @@
+<launch>
+  <!--<arg name="competition_mode" value="$(optenv ARIAC_COMPETITION true)" />-->
+  <include file="$(find ecse_373_ariac)/launch/ecse_373_ariac.launch" pass_all_args = "true">
+    <arg name="python" value="false"/>
+  </include>
+  <node pkg="rosservice" type="rosservice" name="starter_comp" args="info /ariac/start_competition" />
+  <node pkg = "cwru_ecse_373_submission" type = "subscriber_node" name = "subscriber_node"/> 
+
+</launch>

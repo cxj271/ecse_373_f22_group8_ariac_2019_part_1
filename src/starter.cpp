@@ -521,7 +521,7 @@ actionlib::SimpleActionClient<control_msgs::FollowJointTrajectoryAction> traject
                                 ROS_INFO("Done moving Arm to part");
                                 sleep(5);
 
-/*
+
                                 osrf_gear::VacuumGripperControl vac_control; 
                                 vac_control.request.enable = true;
                                 vacuum_client.call(vac_control);
@@ -530,41 +530,45 @@ actionlib::SimpleActionClient<control_msgs::FollowJointTrajectoryAction> traject
                                 ros::Duration(3.0).sleep();
                                 if (vacuum_state.attached){
                                     ROS_INFO("Vacuum has picked up the part");
-                                */
                                 
-                                    // lift_part(&jt);
-                                    // jt_as.action_goal.goal.trajectory = jt;
-                                    // jt_as.action_goal.header.seq = count++;
-                                    // jt_as.action_goal.header.stamp = ros::Time::now();
-                                    // jt_as.action_goal.header.frame_id = "/world";
+                                
+                                    lift_part(&jt);
+                                    jt_as.action_goal.goal.trajectory = jt;
+                                    jt_as.action_goal.header.seq = count++;
+                                    jt_as.action_goal.header.stamp = ros::Time::now();
+                                    jt_as.action_goal.header.frame_id = "/world";
 
-                                    // ROS_INFO("Lifting part up");
-                                    // actionlib::SimpleClientGoalState state3 = trajectory_as.sendGoalAndWait(jt_as.action_goal.goal, ros::Duration(30.0), ros::Duration(30.0)); 
-                                    // ROS_INFO("Action Server returned with status: %s", state3.toString().c_str());
-                                    // ROS_INFO("Done lifting part");
-                                    // sleep(2);
+                                    ROS_INFO("Lifting part up");
+                                    actionlib::SimpleClientGoalState state3 = trajectory_as.sendGoalAndWait(jt_as.action_goal.goal, ros::Duration(30.0), ros::Duration(30.0)); 
+                                    ROS_INFO("Action Server returned with status: %s", state3.toString().c_str());
+                                    ROS_INFO("Done lifting part");
+                                    sleep(2);
 
-                                    // drop_part(&jt);
-                                    // jt_as.action_goal.goal.trajectory = jt;
-                                    // jt_as.action_goal.header.seq = count++;
-                                    // jt_as.action_goal.header.stamp = ros::Time::now();
-                                    // jt_as.action_goal.header.frame_id = "/world";
 
-                                    // ROS_INFO("Putting part down");
-                                    // actionlib::SimpleClientGoalState state4 = trajectory_as.sendGoalAndWait(jt_as.action_goal.goal, ros::Duration(30.0), ros::Duration(30.0)); 
-                                    // ROS_INFO("Action Server returned with status: %s", state4.toString().c_str());
-                                    // ROS_INFO("Done putting part down");
-                                    // sleep(2);
+                                    // we have found a part, grabbed it, and lifted it
+                                    // Now we move the part to the bin
 
-                            //         ROS_INFO("dropping part");
-                            //         vac_control.request.enable = false;
-                            //         vacuum_client.call(vac_control);
-                            //     }
-                            //     else{
-                            //         ROS_ERROR("Vacuum failed");
-                            //         vac_control.request.enable = false;
-                            //         vacuum_client.call(vac_control);
-                            //     }
+                                    drop_part(&jt);
+                                    jt_as.action_goal.goal.trajectory = jt;
+                                    jt_as.action_goal.header.seq = count++;
+                                    jt_as.action_goal.header.stamp = ros::Time::now();
+                                    jt_as.action_goal.header.frame_id = "/world";
+
+                                    ROS_INFO("Putting part down");
+                                    actionlib::SimpleClientGoalState state4 = trajectory_as.sendGoalAndWait(jt_as.action_goal.goal, ros::Duration(30.0), ros::Duration(30.0)); 
+                                    ROS_INFO("Action Server returned with status: %s", state4.toString().c_str());
+                                    ROS_INFO("Done putting part down");
+                                    sleep(2);
+
+                                    ROS_INFO("dropping part");
+                                    vac_control.request.enable = false;
+                                    vacuum_client.call(vac_control);
+                                }
+                                else{
+                                    ROS_ERROR("Vacuum failed");
+                                    vac_control.request.enable = false;
+                                    vacuum_client.call(vac_control);
+                                }
 
                              }
 

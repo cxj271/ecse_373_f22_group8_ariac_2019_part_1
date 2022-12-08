@@ -18,6 +18,8 @@
 #include "tf2_ros/transform_listener.h"
 #include "tf2_geometry_msgs/tf2_geometry_msgs.h"
 #include <queue>
+#include <osrf_gear/VacuumGripperControl.h>
+#include <osrf_gear/VacuumGripperState.h>
 
 
 std_srvs::Trigger begin_comp;
@@ -25,6 +27,7 @@ std_srvs::Trigger begin_comp;
 //my_bool_var.request.data = true;
 
 bool first_run = true;
+osrf_gear::VacuumGripperState vacuum_state;
 
 
 int service_call_succeeded;
@@ -43,6 +46,7 @@ sensor_msgs::JointState joint_states;
 
 
 osrf_gear::LogicalCameraImage first_obj_info;
+
 
 
 void osrf_gearCallback(const osrf_gear::Order::ConstPtr& orders){
@@ -88,6 +92,10 @@ void joint_states_Callback(const sensor_msgs::JointState::ConstPtr& msg){
 joint_states = *msg;
 }
 
+void vacuum_Callback(const osrf_gear::VacuumGripperState::ConstPtr& msg){
+    vacuum_state = *msg;
+}
+
 std::string find_bin_num(std::string material, ros::ServiceClient *client){
     ROS_INFO("trying to find a bin...");
     std::string bin_num_string;
@@ -115,44 +123,9 @@ std::string find_bin_num(std::string material, ros::ServiceClient *client){
     }   
     return bin_num_string;
 }
-/*
-std::string find_bin_num(osrf_gear::Product product, ros::ServiceClient *client){
-    ROS_INFO("trying to find a bin...");
-    std::string bin_num;
-    osrf_gear::GetMaterialLocations mat_bin_locations;
-
-    mat_bin_locations.request.material_type = product.type;
-    osrf_gear::StorageUnit obj_location;
-
-    if(client->call(mat_bin_locations) == 0){
-        ROS_ERROR("No Product and/or Order");
-        bin_num = "N/A";
-    }
-    else{
-
-        // find which bin the part is in and make sure it is not the belt	       
-        for (osrf_gear::StorageUnit unit : mat_bin_locations.response.storage_units){
-            if (strcmp(unit.unit_id.c_str(),"belt") != 0){
-                obj_location = unit;
-            }
-        }
-
-        std::string str = obj_location.unit_id.c_str();
-        size_t i = 0;
-        for ( ; i < str.length(); i++ ){ if ( isdigit(str[i]) ) break;}
-        str = str.substr(i, str.length() - i );
-        bin_num = str.c_str();
-
-        ROS_INFO("\nThe object is: %s.\nIt can be found in: %s.", product.type.c_str(), obj_location.unit_id.c_str());
-
-    }
-    ROS_INFO("return_test");
-    return bin_num;
-}
-*/
 
 void move_to_joint_state(double q_desired[7], ros::Duration duration, trajectory_msgs::JointTrajectory *p_joint_trajectory){
-    ROS_INFO("Getting the trajectory...");
+    //ROS_INFO("Getting the trajectory...");
 
     p_joint_trajectory->header.seq = count++;
     p_joint_trajectory->header.stamp = ros::Time::now();
@@ -189,8 +162,7 @@ void move_to_joint_state(double q_desired[7], ros::Duration duration, trajectory
     // wait 0.5 seconds to start then run for the given duration
     p_joint_trajectory->points[0].time_from_start = ros::Duration(0.1);
     p_joint_trajectory->points[1].time_from_start = duration;
-    
-    //return joint_trajectory_as;
+
     //actionlib::SimpleClientGoalState state = trajectory_as.sendGoalAndWait(joint_trajectory_as.action_goal.goal, ros::Duration(30.0), ros::Duration(30.0)); ROS_INFO("Action Server returned with status: %s", state.toString().c_str());
 }
 
@@ -207,9 +179,38 @@ void move_linear(double y_position,trajectory_msgs::JointTrajectory *p_joint_tra
     q_des[6] = joint_states.position[6];   // wrist_3_joint
 
     move_to_joint_state(q_des, ros::Duration(5.0), p_joint_trajectory);
-    //return jtas;
-
 }
+
+void lift_part(trajectory_msgs::JointTrajectory *p_joint_trajectory){
+
+    // set the desired position to the current joint states except for the input to the linear actuator
+    double q_des[7];
+    q_des[0] = joint_states.position[1];                 // linear_arm_actuator_joint
+    q_des[1] = joint_states.position[3];   // shoulder_pan_joint
+    q_des[2] = joint_states.position[2] - 0.3;   // shoulder_lift_joint
+    q_des[3] = joint_states.position[0];   // elbow_joint
+    q_des[4] = joint_states.position[4];   // wrist_1_joint
+    q_des[5] = joint_states.position[5];   // wrist_2_joint
+    q_des[6] = joint_states.position[6];   // wrist_3_joint
+
+    move_to_joint_state(q_des, ros::Duration(2.0), p_joint_trajectory);
+}
+
+void drop_part(trajectory_msgs::JointTrajectory *p_joint_trajectory){
+
+    // set the desired position to the current joint states except for the input to the linear actuator
+    double q_des[7];
+    q_des[0] = joint_states.position[1];                 // linear_arm_actuator_joint
+    q_des[1] = joint_states.position[3];   // shoulder_pan_joint
+    q_des[2] = joint_states.position[2] + 0.25;   // shoulder_lift_joint
+    q_des[3] = joint_states.position[0];   // elbow_joint
+    q_des[4] = joint_states.position[4];   // wrist_1_joint
+    q_des[5] = joint_states.position[5];   // wrist_2_joint
+    q_des[6] = joint_states.position[6];   // wrist_3_joint
+
+    move_to_joint_state(q_des, ros::Duration(2.0), p_joint_trajectory);
+}
+
 
 void go_home(trajectory_msgs::JointTrajectory *p_joint_trajectory){
 
@@ -224,39 +225,62 @@ void go_home(trajectory_msgs::JointTrajectory *p_joint_trajectory){
     q_des[6] = -0.00027920417487159455;   // wrist_3_joint
 
     
-    move_to_joint_state(q_des, ros::Duration(5.0), p_joint_trajectory);
+    move_to_joint_state(q_des, ros::Duration(8.0), p_joint_trajectory);
     //return jtas;
 
 }
 
-void move_arm(geometry_msgs::PoseStamped desired_pose,trajectory_msgs::JointTrajectory *p_joint_trajectory){
+bool move_arm(geometry_msgs::PoseStamped desired_pose,trajectory_msgs::JointTrajectory *p_joint_trajectory){
 
     double T_des[4][4] = {{0.0, -1.0, 0.0, desired_pose.pose.position.x}, \
 						  {0.0, 0.0, 1.0, desired_pose.pose.position.y}, \
 						  {-1.0, 0.0, 0.0, desired_pose.pose.position.z}, \
 						  {0.0, 0.0, 0.0, 1.0}};
 
+
     double q_des[8][6];
 
     // third arguement could be the pose of the part later
     int num_sols = ur_kinematics::inverse((double *)&T_des, (double *)&q_des, 0.0);
 
-    if (num_sols ==0){
+    int q_sol_ind = 10; //start at some impossible value
+        for (int i = 0; i < num_sols; i++){
+            if (q_des[i][1] > 4.5){
+                if (q_des[i][3] > 2.0){
+
+                    //if (q_des[i][4] < 3.0){
+                        ROS_INFO("Found a solution to inverse kinematics");
+                        q_sol_ind = i;
+                        break; //found a valid solution
+                    //}
+
+                }
+            }
+        }
+    if (q_sol_ind == 10){
+        // solution foud but the arm has to bend backwards or something that doesn't actually work
+        num_sols = 0;
+    }
+    
+
+    if (num_sols == 0){
         ROS_ERROR("No Inverse Kinematic Solutions Found");
-        ROS_WARN("Going to home state...");
-        go_home(p_joint_trajectory);
+        return false;
+        //ROS_WARN("Going to home state...");
+        //go_home(p_joint_trajectory);
     }
     else{
-        ROS_INFO("Found a solution to inverse kinematics");
+        //ROS_INFO("Found a solution to inverse kinematics");
+
         double q_sol[7];
         q_sol[0] = joint_states.position[1]; // linear actuator position
         for( int i=1; i<7; i++){
-            q_sol[i] = q_des[0][i-1];
+            q_sol[i] = q_des[q_sol_ind][i-1];
         }
-        move_to_joint_state(q_sol, ros::Duration(1.0),p_joint_trajectory);
-    }
-
-    //return  jt_as;
+        //ROS_WARN_STREAM(q_sol[0]);
+        move_to_joint_state(q_sol, ros::Duration(3.0),p_joint_trajectory);
+        return true;
+    }  
 
 }
 
@@ -278,10 +302,7 @@ int main(int argc, char **argv)
 
   
   tf2_ros::Buffer tfBuffer;
-  tf2_ros::TransformListener tfListener(tfBuffer);
-  ros::ServiceClient begin_client = n.serviceClient<std_srvs::Trigger>("/ariac/start_competition");
-  service_call_succeeded = begin_client.call(begin_comp);
- 
+  tf2_ros::TransformListener tfListener(tfBuffer); 
   
   ros::Subscriber order_subscriber = n.subscribe("/ariac/orders", 1000, osrf_gearCallback);
   
@@ -299,14 +320,18 @@ int main(int argc, char **argv)
   ros::Subscriber lc_fault2 = n.subscribe("/ariac/quality_control_sensor_2",1000,lc_fault2_Callback);
 
   ros::Subscriber joint_states_h = n.subscribe("/ariac/arm1/joint_states",1000, joint_states_Callback);
+  ros::Subscriber vacuum_state_subcriber = n.subscribe("/ariac/arm1/gripper/state", 1000, vacuum_Callback);
   
-  
+  ros::ServiceClient vacuum_client = n.serviceClient<osrf_gear::VacuumGripperControl>("/ariac/arm1/gripper/control");
+
   ros::ServiceClient request_bin = n.serviceClient<osrf_gear::GetMaterialLocations>("/ariac/material_locations");
   request_bin.waitForExistence();
 
   //actionlib::SimpleActionClient<control_msgs::FollowJointTrajectoryAction> trajectory_as("ariac/arm1/arm/follow_joint_trajectory", true);
 
-  
+ros::ServiceClient begin_client = n.serviceClient<std_srvs::Trigger>("/ariac/start_competition");
+begin_client.waitForExistence();
+service_call_succeeded = begin_client.call(begin_comp);
   
 	if (service_call_succeeded == 0){
 	  ROS_ERROR("Competition service call failed! Goodness Gracious!!");
@@ -324,10 +349,12 @@ int main(int argc, char **argv)
   		}
   	}
 
+
+
 actionlib::SimpleActionClient<control_msgs::FollowJointTrajectoryAction> trajectory_as("ariac/arm1/arm/follow_joint_trajectory", true);
 
   ros::Rate loop_rate(10);
-  ros::AsyncSpinner spinner(4);
+  ros::AsyncSpinner spinner(1);
   spinner.start();
 
   while(ros::ok()){
@@ -343,19 +370,7 @@ actionlib::SimpleActionClient<control_msgs::FollowJointTrajectoryAction> traject
         //order_vec.erase(order_vec.begin());
         
             geometry_msgs::PoseStamped bin,robot_base, des_pose;
-            geometry_msgs::TransformStamped tf, tf_2;
-
-            /*
-            Order of joint_states:
-                - elbow_joint
-                - linear_arm_actuator_joint
-                - shoulder_lift_joint
-                - shoulder_pan_joint
-                - wrist_1_joint
-                - wrist_2_joint
-                - wrist_3_joint
-                - vacuum_gripper_joint
-            */
+            geometry_msgs::TransformStamped tf, tf_2, tf_3;
 
             for (osrf_gear::Shipment shipment: current_order.shipments){
                 for(osrf_gear::Product product: shipment.products){
@@ -389,43 +404,42 @@ actionlib::SimpleActionClient<control_msgs::FollowJointTrajectoryAction> traject
                         bin.pose.position.y = 0.0;
                         bin.pose.position.z = 0.0;
 
+
+
                         tf2::doTransform(bin,robot_base,tf);
                         
-                        double move_base_y = 0.0;
-                        double linear_offset = 0.5;
 
-                        if (bin_num_int == 6){
-                            move_base_y = robot_base.pose.position.y - linear_offset;
-                        }
-                        else {
-                            move_base_y = robot_base.pose.position.y + linear_offset;
-                        }
+                        double move_base_y = 0.0;
+                        double linear_offset = 1.039;
 
                         control_msgs::FollowJointTrajectoryAction jt_as;
-                        trajectory_msgs::JointTrajectory jt;
-
-                        // moving the base of the robot
-                        move_linear(move_base_y, &jt);
-
-                        jt_as.action_goal.goal.trajectory = jt;
-                        jt_as.action_goal.header.seq = count++;
-                        jt_as.action_goal.header.stamp = ros::Time::now();
-                        jt_as.action_goal.header.frame_id = "/world";
-
-                        ROS_INFO("starting to move linear actuator");
-                        actionlib::SimpleClientGoalState state = trajectory_as.sendGoalAndWait(jt_as.action_goal.goal, ros::Duration(30.0), ros::Duration(30.0)); 
-                        ROS_INFO("Action Server returned with status: %s", state.toString().c_str());
-                        ROS_INFO("done moving linear actuator");
-                        sleep(2);
-
-
-                        
-
+                        trajectory_msgs::JointTrajectory jt;                                               
                         
                         // finding the desired joint angles
                         osrf_gear::LogicalCameraImage models_in_bin = lc_bin_vec[bin_num_int-1];
                         for (int i = 0; i<models_in_bin.models.size(); i++){
-                            geometry_msgs::PoseStamped part_pose_local, part_pose_arm_frame;
+
+                            if (bin_num_int == 6){
+                                move_base_y = robot_base.pose.position.y - linear_offset;
+                            }
+                            else {
+                                move_base_y = robot_base.pose.position.y + linear_offset;
+                            }
+
+                            // moving the base of the robot
+                            move_linear(move_base_y, &jt);
+                            jt_as.action_goal.goal.trajectory = jt;
+                            jt_as.action_goal.header.seq = count++;
+                            jt_as.action_goal.header.stamp = ros::Time::now();
+                            jt_as.action_goal.header.frame_id = "/world";
+
+                            ROS_INFO("starting to move linear actuator");
+                            actionlib::SimpleClientGoalState state = trajectory_as.sendGoalAndWait(jt_as.action_goal.goal, ros::Duration(30.0), ros::Duration(30.0)); 
+                            ROS_INFO("Action Server returned with status: %s", state.toString().c_str());
+                            ROS_INFO("done moving linear actuator");
+                            sleep(2);
+
+                            geometry_msgs::PoseStamped part_pose_local, part_pose_arm_frame, part_pose_linear_actuator;
 
                             // Get the pose of the part in the bin
                             part_pose_local.pose.position.x = models_in_bin.models[i].pose.position.x;
@@ -444,25 +458,115 @@ actionlib::SimpleActionClient<control_msgs::FollowJointTrajectoryAction> traject
 
                             // do the transformation
                             tf2::doTransform(part_pose_local, part_pose_arm_frame, tf_2);
-                        
-                            part_pose_arm_frame.pose.position.z += 0.1;
-                            part_pose_arm_frame.pose.orientation.w = 0.707;
-                            part_pose_arm_frame.pose.orientation.x = 0.0;
-                            part_pose_arm_frame.pose.orientation.y = 0.707;
-                            part_pose_arm_frame.pose.orientation.z = 0.0;
 
-                            // moving the base of the robot
-                            move_arm(part_pose_arm_frame, &jt);
-                            jt_as.action_goal.goal.trajectory = jt;
-                            jt_as.action_goal.header.seq = count++;
-                            jt_as.action_goal.header.stamp = ros::Time::now();
-                            jt_as.action_goal.header.frame_id = "/world";
+                            // TODO: make move_arm a bool to check if inverse kinematics exist and only try to move if it does
+                            bool IK_found = move_arm(part_pose_arm_frame, &jt);
 
-                            ROS_INFO("Moving Arm to part");
-                            actionlib::SimpleClientGoalState state2 = trajectory_as.sendGoalAndWait(jt_as.action_goal.goal, ros::Duration(30.0), ros::Duration(30.0)); 
-                            ROS_INFO("Action Server returned with status: %s", state.toString().c_str());
-                            ROS_INFO("Done moving Arm to part");
-                            sleep(2);
+                            if (!IK_found){
+
+                                for (int ii = 0; ii < 6; ii++){
+                                    //try moving a bit closer
+                                    ROS_INFO("Let's try moving a bit closer");
+                                    if (bin_num_int == 6){
+                                    move_base_y += 0.05;
+                                    }
+                                    else {
+                                    move_base_y -= 0.05;
+                                    }
+                                    move_linear(move_base_y, &jt);
+                                    jt_as.action_goal.goal.trajectory = jt;
+                                    jt_as.action_goal.header.seq = count++;
+                                    jt_as.action_goal.header.stamp = ros::Time::now();
+                                    jt_as.action_goal.header.frame_id = "/world";
+                                    //ROS_INFO("starting to move linear actuator");
+                                    actionlib::SimpleClientGoalState state10 = trajectory_as.sendGoalAndWait(jt_as.action_goal.goal, ros::Duration(30.0), ros::Duration(30.0)); 
+                                    ROS_INFO("Action Server returned with status: %s", state10.toString().c_str());
+                                    //ROS_INFO("done moving linear actuator");
+                                    sleep(2);
+
+                                    try{
+                                        // find the transform from the part pose in the bin to the base of the robot arm
+                                        tf_2 = tfBuffer.lookupTransform("arm1_base_link", frame_name, ros::Time(0.0), ros::Duration(1.0));
+                                        ROS_DEBUG("Transform to [%s] from [%s]", tf_2.header.frame_id.c_str(),
+                                        tf.child_frame_id.c_str());
+                                    } 
+                                    catch (tf2::TransformException &ex) {
+                                        ROS_ERROR("%s", ex.what());
+                                    }
+                                    
+                                    // do the transformation
+                                    tf2::doTransform(part_pose_local, part_pose_arm_frame, tf_2);
+
+                                    IK_found = move_arm(part_pose_arm_frame, &jt);
+                                    ROS_WARN_STREAM(IK_found);
+                                    if (IK_found){
+                                        break;
+                                    }
+                                }
+
+                            }
+
+                            IK_found = move_arm(part_pose_arm_frame, &jt);
+
+                            
+                            if (IK_found == true){
+                                jt_as.action_goal.goal.trajectory = jt;
+                                jt_as.action_goal.header.seq = count++;
+                                jt_as.action_goal.header.stamp = ros::Time::now();
+                                jt_as.action_goal.header.frame_id = "/world";
+
+                                ROS_INFO("Moving Arm to part %i", i);
+                                actionlib::SimpleClientGoalState state2 = trajectory_as.sendGoalAndWait(jt_as.action_goal.goal, ros::Duration(30.0), ros::Duration(30.0)); 
+                                ROS_INFO("Action Server returned with status: %s", state2.toString().c_str());
+                                ROS_INFO("Done moving Arm to part");
+                                sleep(5);
+
+/*
+                                osrf_gear::VacuumGripperControl vac_control; 
+                                vac_control.request.enable = true;
+                                vacuum_client.call(vac_control);
+                                ROS_INFO("gripper on");
+
+                                ros::Duration(3.0).sleep();
+                                if (vacuum_state.attached){
+                                    ROS_INFO("Vacuum has picked up the part");
+                                */
+                                
+                                    // lift_part(&jt);
+                                    // jt_as.action_goal.goal.trajectory = jt;
+                                    // jt_as.action_goal.header.seq = count++;
+                                    // jt_as.action_goal.header.stamp = ros::Time::now();
+                                    // jt_as.action_goal.header.frame_id = "/world";
+
+                                    // ROS_INFO("Lifting part up");
+                                    // actionlib::SimpleClientGoalState state3 = trajectory_as.sendGoalAndWait(jt_as.action_goal.goal, ros::Duration(30.0), ros::Duration(30.0)); 
+                                    // ROS_INFO("Action Server returned with status: %s", state3.toString().c_str());
+                                    // ROS_INFO("Done lifting part");
+                                    // sleep(2);
+
+                                    // drop_part(&jt);
+                                    // jt_as.action_goal.goal.trajectory = jt;
+                                    // jt_as.action_goal.header.seq = count++;
+                                    // jt_as.action_goal.header.stamp = ros::Time::now();
+                                    // jt_as.action_goal.header.frame_id = "/world";
+
+                                    // ROS_INFO("Putting part down");
+                                    // actionlib::SimpleClientGoalState state4 = trajectory_as.sendGoalAndWait(jt_as.action_goal.goal, ros::Duration(30.0), ros::Duration(30.0)); 
+                                    // ROS_INFO("Action Server returned with status: %s", state4.toString().c_str());
+                                    // ROS_INFO("Done putting part down");
+                                    // sleep(2);
+
+                            //         ROS_INFO("dropping part");
+                            //         vac_control.request.enable = false;
+                            //         vacuum_client.call(vac_control);
+                            //     }
+                            //     else{
+                            //         ROS_ERROR("Vacuum failed");
+                            //         vac_control.request.enable = false;
+                            //         vacuum_client.call(vac_control);
+                            //     }
+
+                             }
 
 
                             go_home(&jt);
@@ -472,9 +576,10 @@ actionlib::SimpleActionClient<control_msgs::FollowJointTrajectoryAction> traject
                             jt_as.action_goal.header.frame_id = "/world";
 
                             ROS_INFO("Moving to home state");
-                            actionlib::SimpleClientGoalState state3 = trajectory_as.sendGoalAndWait(jt_as.action_goal.goal, ros::Duration(30.0), ros::Duration(30.0)); ROS_INFO("Action Server returned with status: %s", state.toString().c_str());
+                            actionlib::SimpleClientGoalState state5 = trajectory_as.sendGoalAndWait(jt_as.action_goal.goal, ros::Duration(30.0), ros::Duration(30.0)); 
+                            ROS_INFO("Action Server returned with status: %s", state5.toString().c_str());
                             ROS_INFO("Done moving to home state");
-                            sleep(2);
+                            sleep(5);
                         }
 
                     }

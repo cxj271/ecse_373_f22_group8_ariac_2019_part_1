@@ -15,4 +15,5 @@ This launch file will do the following:
 - Start the ros node to control the robot arm
 
 
-This is for lab 6. The arm goes to each part in a bin, then returns to a home state.
+This is for the final project. The arm goes to each part, turns on the
+gripper, lifts, lowers, then turns off the gripper. 

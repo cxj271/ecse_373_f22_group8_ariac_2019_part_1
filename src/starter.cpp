@@ -20,6 +20,8 @@
 #include <queue>
 #include <osrf_gear/VacuumGripperControl.h>
 #include <osrf_gear/VacuumGripperState.h>
+#include "osrf_gear/SubmitShipment.h"
+#include "osrf_gear/AGVControl.h"
 
 
 std_srvs::Trigger begin_comp;
@@ -32,6 +34,7 @@ osrf_gear::VacuumGripperState vacuum_state;
 
 int service_call_succeeded;
 int count = 0;
+int agv_bin1_parts = 0;
 
 std::vector<osrf_gear::Order> order_vec;
 
@@ -187,7 +190,7 @@ void lift_part(trajectory_msgs::JointTrajectory *p_joint_trajectory){
     double q_des[7];
     q_des[0] = joint_states.position[1];                 // linear_arm_actuator_joint
     q_des[1] = joint_states.position[3];   // shoulder_pan_joint
-    q_des[2] = joint_states.position[2] - 0.3;   // shoulder_lift_joint
+    q_des[2] = joint_states.position[2] - 0.25;   // shoulder_lift_joint
     q_des[3] = joint_states.position[0];   // elbow_joint
     q_des[4] = joint_states.position[4];   // wrist_1_joint
     q_des[5] = joint_states.position[5];   // wrist_2_joint
@@ -202,7 +205,7 @@ void drop_part(trajectory_msgs::JointTrajectory *p_joint_trajectory){
     double q_des[7];
     q_des[0] = joint_states.position[1];                 // linear_arm_actuator_joint
     q_des[1] = joint_states.position[3];   // shoulder_pan_joint
-    q_des[2] = joint_states.position[2] + 0.25;   // shoulder_lift_joint
+    q_des[2] = joint_states.position[2] + 0.22;   // shoulder_lift_joint
     q_des[3] = joint_states.position[0];   // elbow_joint
     q_des[4] = joint_states.position[4];   // wrist_1_joint
     q_des[5] = joint_states.position[5];   // wrist_2_joint
@@ -352,45 +355,40 @@ service_call_succeeded = begin_client.call(begin_comp);
 
 
 actionlib::SimpleActionClient<control_msgs::FollowJointTrajectoryAction> trajectory_as("ariac/arm1/arm/follow_joint_trajectory", true);
+auto agv1_client = n.serviceClient<osrf_gear::AGVControl>("/ariac/agv1");
+agv1_client.waitForExistence(ros::Duration(1.0));
 
   ros::Rate loop_rate(10);
   ros::AsyncSpinner spinner(1);
   spinner.start();
 
   while(ros::ok()){
+    ROS_INFO("Waiting a bit to finish setting up the competition");
     sleep(10); // just giving everything time to finish setting up
-
-
-    //ROS_INFO("in while");
-
 	  if(!order_vec.empty()){
-
-
         osrf_gear::Order current_order = order_vec.at(0);
-        //order_vec.erase(order_vec.begin());
+        order_vec.erase(order_vec.begin());
         
             geometry_msgs::PoseStamped bin,robot_base, des_pose;
-            geometry_msgs::TransformStamped tf, tf_2, tf_3;
+            geometry_msgs::TransformStamped tf, tf_2, tf_3, tf_4;
 
             for (osrf_gear::Shipment shipment: current_order.shipments){
                 for(osrf_gear::Product product: shipment.products){
 
                     std::string bin_number = find_bin_num(product.type.c_str(), &request_bin);
 
+                    //find the pin of each product start to move things once it is found
                     if (bin_number == "N/A" || bin_number.empty()){
                         ROS_ERROR("The bin for the part was not found");
                     }
                     else{
                         
                         int bin_num_int;
-                        
+                        // convert from string to integer
                         bin_num_int = stoi(bin_number);
                         
-                        first_obj_info = lc_bin_vec[bin_num_int-1];
-                        
-
                         const std::string frame_name = "logical_camera_bin" + bin_number + "_frame";
-
+                        // look up the transform from the bin for the part to the linear actuator frame
                         try{
                             tf = tfBuffer.lookupTransform("arm1_linear_arm_actuator", frame_name, ros::Time(0.0), ros::Duration(1.0));
                             ROS_DEBUG("Transform to [%s] from [%s]", tf.header.frame_id.c_str(),
@@ -404,11 +402,8 @@ actionlib::SimpleActionClient<control_msgs::FollowJointTrajectoryAction> traject
                         bin.pose.position.y = 0.0;
                         bin.pose.position.z = 0.0;
 
-
-
                         tf2::doTransform(bin,robot_base,tf);
                         
-
                         double move_base_y = 0.0;
                         double linear_offset = 1.039;
 
@@ -417,8 +412,10 @@ actionlib::SimpleActionClient<control_msgs::FollowJointTrajectoryAction> traject
                         
                         // finding the desired joint angles
                         osrf_gear::LogicalCameraImage models_in_bin = lc_bin_vec[bin_num_int-1];
+                        //for each part in a bin...
                         for (int i = 0; i<models_in_bin.models.size(); i++){
-
+                            
+                            //move the base of the robot near to a the let of bins 1-5, and to the right of bin 6
                             if (bin_num_int == 6){
                                 move_base_y = robot_base.pose.position.y - linear_offset;
                             }
@@ -426,7 +423,7 @@ actionlib::SimpleActionClient<control_msgs::FollowJointTrajectoryAction> traject
                                 move_base_y = robot_base.pose.position.y + linear_offset;
                             }
 
-                            // moving the base of the robot
+                            // moving the base of the robot to the specified locatioin
                             move_linear(move_base_y, &jt);
                             jt_as.action_goal.goal.trajectory = jt;
                             jt_as.action_goal.header.seq = count++;
@@ -446,6 +443,7 @@ actionlib::SimpleActionClient<control_msgs::FollowJointTrajectoryAction> traject
                             part_pose_local.pose.position.y = models_in_bin.models[i].pose.position.y;
                             part_pose_local.pose.position.z = models_in_bin.models[i].pose.position.z;
 
+
                             try{
                                 // find the transform from the part pose in the bin to the base of the robot arm
                                 tf_2 = tfBuffer.lookupTransform("arm1_base_link", frame_name, ros::Time(0.0), ros::Duration(1.0));
@@ -456,15 +454,17 @@ actionlib::SimpleActionClient<control_msgs::FollowJointTrajectoryAction> traject
                                 ROS_ERROR("%s", ex.what());
                             }
 
-                            // do the transformation
+                            // do the transformation from the local pose to the pose in the arm frame
                             tf2::doTransform(part_pose_local, part_pose_arm_frame, tf_2);
 
-                            // TODO: make move_arm a bool to check if inverse kinematics exist and only try to move if it does
+                            //see if there are valid inverse kinematics
                             bool IK_found = move_arm(part_pose_arm_frame, &jt);
 
                             if (!IK_found){
-
-                                for (int ii = 0; ii < 6; ii++){
+                                
+                                // if no inverse kinematics for the current position of the base of the robot, try moving it a bit closer
+                                // will try to move a bit closer up to 5 times in incriments of 0.05
+                               for (int ii = 0; ii < 6; ii++){
                                     //try moving a bit closer
                                     ROS_INFO("Let's try moving a bit closer");
                                     if (bin_num_int == 6){
@@ -498,17 +498,15 @@ actionlib::SimpleActionClient<control_msgs::FollowJointTrajectoryAction> traject
                                     tf2::doTransform(part_pose_local, part_pose_arm_frame, tf_2);
 
                                     IK_found = move_arm(part_pose_arm_frame, &jt);
-                                    ROS_WARN_STREAM(IK_found);
                                     if (IK_found){
+                                        // once we find inverse kinematics, break the loop so we stop moving the base
                                         break;
                                     }
                                 }
 
                             }
-
-                            IK_found = move_arm(part_pose_arm_frame, &jt);
-
                             
+                            // if we were able to find inverse kinematics, start to move to the part
                             if (IK_found == true){
                                 jt_as.action_goal.goal.trajectory = jt;
                                 jt_as.action_goal.header.seq = count++;
@@ -521,17 +519,19 @@ actionlib::SimpleActionClient<control_msgs::FollowJointTrajectoryAction> traject
                                 ROS_INFO("Done moving Arm to part");
                                 sleep(5);
 
-
+                                // once we are at the part, turn on the vacuum gripper
                                 osrf_gear::VacuumGripperControl vac_control; 
                                 vac_control.request.enable = true;
                                 vacuum_client.call(vac_control);
                                 ROS_INFO("gripper on");
 
                                 ros::Duration(3.0).sleep();
+
+                                // check to see if the vacuum gripper is holding the part
                                 if (vacuum_state.attached){
                                     ROS_INFO("Vacuum has picked up the part");
                                 
-                                
+                                    // if the gripper is holding the part, lift slightly
                                     lift_part(&jt);
                                     jt_as.action_goal.goal.trajectory = jt;
                                     jt_as.action_goal.header.seq = count++;
@@ -546,23 +546,226 @@ actionlib::SimpleActionClient<control_msgs::FollowJointTrajectoryAction> traject
 
 
                                     // we have found a part, grabbed it, and lifted it
-                                    // Now we move the part to the bin
+                                    // Now we move the part to the home position before moving to the bin
+                                    go_home(&jt);
+                                    jt_as.action_goal.goal.trajectory = jt;
+                                    jt_as.action_goal.header.seq = count++;
+                                    jt_as.action_goal.header.stamp = ros::Time::now();
+                                    jt_as.action_goal.header.frame_id = "/world";
+                                    ROS_INFO("Moving to home state");
+                                    actionlib::SimpleClientGoalState state6 = trajectory_as.sendGoalAndWait(jt_as.action_goal.goal, ros::Duration(30.0), ros::Duration(30.0)); 
+                                    ROS_INFO("Action Server returned with status: %s", state6.toString().c_str());
+                                    ROS_INFO("Done moving to home state");
+                                    sleep(5);
 
-                                    drop_part(&jt);
+
+
+                                    // get the transformation from from the agv1 bin to the linear actuator frame
+                                    const std::string agv_frame = "logical_camera_agv1_frame";
+                                    try{
+                                        // find the transform from the agv bin to the base of the robot arm
+                                        tf_2 = tfBuffer.lookupTransform("arm1_linear_arm_actuator", agv_frame, ros::Time(0.0), ros::Duration(1.0));
+                                        ROS_DEBUG("Transform to [%s] from [%s]", tf_2.header.frame_id.c_str(),
+                                        tf_2.child_frame_id.c_str());
+                                    } 
+                                    catch (tf2::TransformException &ex) {
+                                        ROS_ERROR("%s", ex.what());
+                                    }
+                                    
+                                    // do the transformation
+                                    geometry_msgs::PoseStamped agv_pos, des_part_pose_lin;
+                                    tf2::doTransform(bin, agv_pos, tf_2);
+
+                                    //ROS_WARN_STREAM(agv_pos);
+
+                                    // move the base of the robot near the agv1 bin
+                                    move_base_y = agv_pos.pose.position.y - 1.35;
+
+                                    // set the desired part pose with respect to the agv1 camera frame
+                                    geometry_msgs::PoseStamped final_part_pose_local, final_part_pose_arm_frame;
+
+                                    final_part_pose_local.pose.position.x = product.pose.position.x;
+                                    final_part_pose_local.pose.position.y = product.pose.position.y;
+                                    final_part_pose_local.pose.position.z = product.pose.position.z;
+
+                                    
+                                    //final_part_pose_local.pose.position.x += 0.2;
+
+                                    //ROS_WARN_STREAM(final_part_pose_local);
+
+                                    // moving the base of the robot to agv bin 1
+                                    move_linear(move_base_y, &jt);
+                                    jt_as.action_goal.goal.trajectory = jt;
+                                    jt_as.action_goal.header.seq = count++;
+                                    jt_as.action_goal.header.stamp = ros::Time::now();
+
+                                    jt_as.action_goal.header.frame_id = "/world";
+
+                                    ROS_INFO("starting to move linear actuator");
+                                    actionlib::SimpleClientGoalState state = trajectory_as.sendGoalAndWait(jt_as.action_goal.goal, ros::Duration(30.0), ros::Duration(30.0)); 
+                                    ROS_INFO("Action Server returned with status: %s", state.toString().c_str());
+                                    ROS_INFO("done moving linear actuator");
+                                    sleep(2);
+
+                                    // transform from the desired part location to the base of the arm
+                                    try{
+                                        // find the transform from the part pose in the bin to the base of the robot arm
+                                        tf_3 = tfBuffer.lookupTransform("arm1_base_link", agv_frame, ros::Time(0.0), ros::Duration(1.0));
+                                        ROS_DEBUG("Transform to [%s] from [%s]", tf_2.header.frame_id.c_str(),
+                                        tf.child_frame_id.c_str());
+                                    } 
+                                    catch (tf2::TransformException &ex) {
+                                        ROS_ERROR("%s", ex.what());
+                                    }
+                                    
+                                    tf2::doTransform(final_part_pose_local, final_part_pose_arm_frame, tf_3);
+                                    //bin.pose.position.y = -0.25;
+                                    //tf2::doTransform(bin, final_part_pose_arm_frame, tf_3);
+
+                                    // make the z position slightly higher than given
+                                    //final_part_pose_arm_frame.pose.position.z -= 0.2;
+                                    // try to do the inverse kinematics 
+                                    final_part_pose_arm_frame.pose.position.z -= 0.3;
+                                    bool agv_inverse_k = move_arm(final_part_pose_arm_frame, &jt);
+
+                                    if (!agv_inverse_k){
+                                        //if no inverse kinematics found, try moving a bit closer
+                                        for (int ii = 0; ii < 10; ii++){
+                                            //try moving a bit closer
+                                            ROS_INFO("Let's try moving a bit closer");
+                                            
+                                            move_base_y += 0.05;
+                                            
+                                            move_linear(move_base_y, &jt);
+                                            jt_as.action_goal.goal.trajectory = jt;
+                                            jt_as.action_goal.header.seq = count++;
+                                            jt_as.action_goal.header.stamp = ros::Time::now();
+                                            jt_as.action_goal.header.frame_id = "/world";
+                                            //ROS_INFO("starting to move linear actuator");
+                                            actionlib::SimpleClientGoalState state11 = trajectory_as.sendGoalAndWait(jt_as.action_goal.goal, ros::Duration(30.0), ros::Duration(30.0)); 
+                                            ROS_INFO("Action Server returned with status: %s", state11.toString().c_str());
+                                            //ROS_INFO("done moving linear actuator");
+                                            sleep(2);
+
+                                            try{
+                                                // find the transform from the part pose in the bin to the base of the robot arm
+                                                tf_4 = tfBuffer.lookupTransform("arm1_base_link", agv_frame, ros::Time(0.0), ros::Duration(1.0));
+                                                ROS_DEBUG("Transform to [%s] from [%s]", tf_4.header.frame_id.c_str(),
+                                                tf.child_frame_id.c_str());
+                                            } 
+                                            catch (tf2::TransformException &ex) {
+                                                ROS_ERROR("%s", ex.what());
+                                            }
+                                            
+                                            // do the transformation
+                                            tf2::doTransform(final_part_pose_local, final_part_pose_arm_frame, tf_4);
+                                            //tf2::doTransform(bin, final_part_pose_arm_frame, tf_4);
+
+                                            final_part_pose_arm_frame.pose.position.z -= 0.3;
+                                            agv_inverse_k = move_arm(final_part_pose_arm_frame, &jt);
+
+                        
+                                            if (agv_inverse_k){
+                                                // break the for loop once IK are found
+                                                break;
+                                            }
+                                        }
+
+                                    }
+                                    // actually move the arm
                                     jt_as.action_goal.goal.trajectory = jt;
                                     jt_as.action_goal.header.seq = count++;
                                     jt_as.action_goal.header.stamp = ros::Time::now();
                                     jt_as.action_goal.header.frame_id = "/world";
 
-                                    ROS_INFO("Putting part down");
-                                    actionlib::SimpleClientGoalState state4 = trajectory_as.sendGoalAndWait(jt_as.action_goal.goal, ros::Duration(30.0), ros::Duration(30.0)); 
-                                    ROS_INFO("Action Server returned with status: %s", state4.toString().c_str());
-                                    ROS_INFO("Done putting part down");
-                                    sleep(2);
+                                    ROS_INFO("Moving Arm to agv bin %i", i);
+                                    actionlib::SimpleClientGoalState state7 = trajectory_as.sendGoalAndWait(jt_as.action_goal.goal, ros::Duration(30.0), ros::Duration(30.0)); 
+                                    ROS_INFO("Action Server returned with status: %s", state7.toString().c_str());
+                                    ROS_INFO("Done moving Arm to agv bin");
+                                    sleep(5);
+                                    //ROS_WARN_STREAM(joint_states);
 
-                                    ROS_INFO("dropping part");
+                                    // turn the vacuum gripper off
+                                    osrf_gear::VacuumGripperControl vac_control; 
                                     vac_control.request.enable = false;
                                     vacuum_client.call(vac_control);
+                                    ROS_INFO("gripper off");
+
+                                    ros::Duration(3.0).sleep();
+                    
+                                    osrf_gear::LogicalCameraImage models_in_agv = lc_agv_vec[0];
+                                    
+                                    //check to see if there was a part added to the agv1 bin
+                                    if(models_in_agv.models.size() > agv_bin1_parts){
+                                        agv_bin1_parts++;
+
+                                        //ROS_WARN_STREAM(models_in_agv.models.size());
+                                        //ROS_WARN_STREAM(models_in_agv.models);
+                                        //ROS_WARN_STREAM(models_in_agv.models[0]);                                        
+
+                                        //ROS_WARN_STREAM(product.pose);
+
+                                        if (agv_bin1_parts == shipment.products.size()){
+                                            //send shipment
+
+                                             go_home(&jt);
+                                            jt_as.action_goal.goal.trajectory = jt;
+                                            jt_as.action_goal.header.seq = count++;
+                                            jt_as.action_goal.header.stamp = ros::Time::now();
+                                            jt_as.action_goal.header.frame_id = "/world";
+
+                                            ROS_INFO("Moving to home state");
+                                            actionlib::SimpleClientGoalState state5 = trajectory_as.sendGoalAndWait(jt_as.action_goal.goal, ros::Duration(30.0), ros::Duration(30.0)); 
+                                            ROS_INFO("Action Server returned with status: %s", state5.toString().c_str());
+                                            ROS_INFO("Done moving to home state");
+                                            sleep(5);
+
+
+                                            osrf_gear::AGVControl submit_shipment;
+                                            submit_shipment.request.shipment_type = shipment.shipment_type;
+                                            bool ship_status = agv1_client.call(submit_shipment);
+                                            ros::Duration(2.0).sleep();
+                                            if (ship_status){
+                                                ROS_INFO("Shipment Submitted");
+                                            }
+                                            else{
+                                                ROS_ERROR("Shipment unsuccesful:  %s", submit_shipment.response.message.c_str());
+                                            }
+                                            agv_bin1_parts = 0;
+
+                                        }
+
+                                        ROS_INFO("Part successfully added to AGV Bin 1");
+                                        go_home(&jt);
+                                        jt_as.action_goal.goal.trajectory = jt;
+                                        jt_as.action_goal.header.seq = count++;
+                                        jt_as.action_goal.header.stamp = ros::Time::now();
+                                        jt_as.action_goal.header.frame_id = "/world";
+
+                                        ROS_INFO("Moving to home state");
+                                        actionlib::SimpleClientGoalState state5 = trajectory_as.sendGoalAndWait(jt_as.action_goal.goal, ros::Duration(30.0), ros::Duration(30.0)); 
+                                        ROS_INFO("Action Server returned with status: %s", state5.toString().c_str());
+                                        ROS_INFO("Done moving to home state");
+                                        sleep(5);
+
+                                        break;
+                                    }
+
+// drop_part(&jt);
+// jt_as.action_goal.goal.trajectory = jt;
+// jt_as.action_goal.header.seq = count++;
+// jt_as.action_goal.header.stamp = ros::Time::now();
+// jt_as.action_goal.header.frame_id = "/world";
+
+// ROS_INFO("Putting part down");
+// actionlib::SimpleClientGoalState state4 = trajectory_as.sendGoalAndWait(jt_as.action_goal.goal, ros::Duration(30.0), ros::Duration(30.0)); 
+// ROS_INFO("Action Server returned with status: %s", state4.toString().c_str());
+// ROS_INFO("Done putting part down");
+// sleep(2);
+
+// ROS_INFO("dropping part");
+// vac_control.request.enable = false;
+// vacuum_client.call(vac_control);
                                 }
                                 else{
                                     ROS_ERROR("Vacuum failed");
@@ -571,7 +774,6 @@ actionlib::SimpleActionClient<control_msgs::FollowJointTrajectoryAction> traject
                                 }
 
                              }
-
 
                             go_home(&jt);
                             jt_as.action_goal.goal.trajectory = jt;

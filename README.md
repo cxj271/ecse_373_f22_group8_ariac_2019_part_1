@@ -15,5 +15,7 @@ This launch file will do the following:
 - Start the ros node to control the robot arm
 
 
-This is for the final project. The arm goes to each part, turns on the
-gripper, lifts, lowers, then turns off the gripper. 
+This is for the final project, Phase 2.
+Parts are added to the agv bin and shipments are sent once complete.
+
+Please see "Theory of Operation" folder for a flow chart of the process.

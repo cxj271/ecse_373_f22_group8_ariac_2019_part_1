@@ -18,4 +18,4 @@ This launch file will do the following:
 This is for the final project, Phase 2.
 Parts are added to the agv bin and shipments are sent once complete.
 
-Please see "Theory of Operation" folder for a flow chart of the process.
+Please see "Theory of Operation" folder [here](https://github.com/cxj271/ecse_373_f22_group8_ariac_2019_part_1/blob/main/Theory%20of%20Operation/Final%20Project%20Flow%20Diagram.pdf) for a flow chart of the process.
